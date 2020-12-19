@@ -9,7 +9,7 @@
    slotted-class
    slotted-object
    make-unbound-marker
-   allocate-instance-data
+   allocate-slotted-instance
    class-wrapper
    instance-wrapper
    instance-slots

@@ -20,7 +20,7 @@
   #+sbcl '(sb-kernel:make-unbound-marker))
 
 
-(defun allocate-instance-data (wrapper instance-slots)
+(defun allocate-slotted-instance (wrapper instance-slots)
   #+allegro
   (excl::.primcall 'sys::new-standard-instance
                    wrapper
@@ -53,6 +53,15 @@
   #+ccl (ccl::instance.class-wrapper ins))
 
 
+(defun (setf instance-wrapper) (value ins)
+  (setf 
+   #+allegro (excl::std-instance-wrapper ins)
+   #+lispworks (clos::standard-instance-wrapper ins)
+   #+sbcl (sb-kernel::%instance-layout ins)
+   #+ccl (ccl::instance.class-wrapper ins)
+   value))
+
+
 (defun instance-slots (ins)
   #+allegro (excl::std-instance-slots ins)
   #+lispworks (clos::standard-instance-static-slots ins)
@@ -69,11 +78,18 @@
    value))
 
 
+(defgeneric allocate-slot-storage (class size initial-value))
+
+
+(defmethod allocate-slot-storage ((class slotted-class) size initial-value)
+  (make-sequence 'vector size :initial-element initial-value))
+
+
 (defmethod allocate-instance ((class slotted-class) &rest initargs)
-  (allocate-instance-data (class-wrapper class)
-                          (make-sequence 'vector
-                                         (length (class-slots class))
-                                         :initial-element (make-unbound-marker))))
+  (allocate-slotted-instance (class-wrapper class)
+                             (allocate-slot-storage class
+                                                    (length (class-slots class))
+                                                    (make-unbound-marker))))
 
 
 (defmethod slot-value-using-class ((class slotted-class) instance (slotd slot-definition))
@@ -119,6 +135,43 @@
                   (member (slot-definition-name slotd) slot-names))
           (initialize-slot-from-initfunction class instance slotd)))))
   instance)
+
+
+(defmethod update-instance-for-different-class
+           ((pre slotted-object) (cur standard-object) &key &allow-other-keys)
+  (dolist (slotd (class-slots (class-of cur)))
+    (let ((slot-name (slot-definition-name slotd)))
+      (when (slot-exists-p pre slot-name)
+        (setf (slot-value cur slot-name)
+              (slot-value pre slot-name))))))
+
+
+(defmethod update-instance-for-different-class
+           ((pre standard-object) (cur slotted-object) &key &allow-other-keys)
+  (let ((cur-class (class-of cur)))
+    (setf (instance-slots cur)
+          (allocate-slot-storage cur-class
+                                 (length (class-slots cur-class))
+                                 (make-unbound-marker)))
+    (dolist (slotd (class-slots cur-class))
+      (let ((slot-name (slot-definition-name slotd)))
+        (when (slot-exists-p pre slot-name)
+          (setf (slot-value cur slot-name)
+                (slot-value pre slot-name)))))))
+
+
+(defmethod update-instance-for-different-class
+           ((pre slotted-object) (cur slotted-object) &key &allow-other-keys)
+  (let ((cur-class (class-of cur)))
+    (setf (instance-slots cur)
+          (allocate-slot-storage cur-class
+                                 (length (class-slots cur-class))
+                                 (make-unbound-marker)))
+    (dolist (slotd (class-slots cur-class))
+      (let ((slot-name (slot-definition-name slotd)))
+        (when (slot-exists-p pre slot-name)
+          (setf (slot-value cur slot-name)
+                (slot-value pre slot-name)))))))
 
 
 ;;; *EOF*
